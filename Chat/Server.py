@@ -1,50 +1,50 @@
 import socket
+import threading
 
-def broadcast_data(sock, message):
-    for socket in connections:
-        if socket != server_socket and socket != sock:
-            try:
-                socket.send(message)
-            except:
-                socket.close()
-                connections.remove(socket)
+HOST = '127.0.0.1'
+PORT = 65432
 
-def main():
-    # Create the server socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(("0.0.0.0", 5000))
-    server_socket.listen(100)
+clients = []
+names = []
 
-    # List to keep track of all connected clients
-    connections = [server_socket]
+def broadcast(message, prefix=""):
+    for client in clients:
+        client.send(f'{prefix}{message}'.encode())
 
-    print("Chat server started on port 5000")
-
+def handle(client):
+    name = client.recv(1024).decode().split(" ")[-1]
+    names.append(name)
+    broadcast(f'{name} joined the chat!', prefix='[INFO] ')
+    client.send(f'Welcome {name}!'.encode())
     while True:
-        # Get the list of read sockets
-        read_sockets, write_sockets, error_sockets = select.select(connections, [], [])
+        message = client.recv(1024).decode()
+        if message:
+            broadcast(f'{name}: {message}', prefix='[MESSAGE] ')
+        else:
+            index = clients.index(client)
+            clients.remove(client)
+            client.close()
+            broadcast(f'{names[index]} left the chat...', prefix='[INFO] ')
+            name_index = names.index(name)
+            names.pop(name_index)
+            break
 
-        for sock in read_sockets:
-            # New connection
-            if sock == server_socket:
-                sockfd, addr = server_socket.accept()
-                connections.append(sockfd)
-                print("Client (%s, %s) connected" % addr)
-                broadcast_data(sockfd, "[%s:%s] entered the chat room\n" % addr)
-            # New message from a client
-            else:
-                try:
-                    data = sock.recv(1024)
-                    if data:
-                        broadcast_data(sock, "\r" + '<' + str(sock.getpeername()) + '> ' + data)
-                except:
-                    broadcast_data(sock, "Client (%s, %s) is offline" % addr)
-                    print("Client (%s, %s) is offline" % addr)
-                    sock.close()
-                    connections.remove(sock)
-                    continue
-    server_socket.close()
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen(5)
 
-if __name__ == '__main__':
-    main()
+print(f'Server listening on {HOST}:{PORT}...')
+
+while True:
+    client, address = server.accept()
+    print(f'Accepted connection from {address}')
+    client.send('NAMEREQUIRED'.encode())
+    name = client.recv(1024).decode().split(" ")[-1]
+    print(f'Name of client is {name}!')
+    client.send(f'Welcome {name}!'.encode())
+    clients.append(client)
+    print(f'Connected clients: {clients}')
+    client_thread = threading.Thread(target=handle, args=(client,))
+    client_thread.start()
+
+server.close()
